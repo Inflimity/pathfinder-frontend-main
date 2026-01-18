@@ -29,7 +29,8 @@ export default function TryMeTeaser() {
             const data = await res.json();
             setResponse(data.response);
         } catch (error) {
-            console.error(error);
+            // console.error(error);
+
             setResponse("Vector synthesis interrupted. Intelligence engine offline.");
         } finally {
             setLoading(false);

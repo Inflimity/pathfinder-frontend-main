@@ -35,6 +35,9 @@ export default function UserDashboard() {
     const supabase = createClient();
     const router = useRouter();
 
+    const [sessions, setSessions] = useState<any[]>([]);
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
     useEffect(() => {
         const checkUser = async () => {
             const { data: { user } } = await supabase.auth.getUser();
@@ -43,6 +46,18 @@ export default function UserDashboard() {
             } else {
                 setUser(user);
                 setLoading(false);
+
+                // Fetch recent sessions
+                const { data: recentSessions } = await supabase
+                    .from('conversations')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(5);
+
+                if (recentSessions) {
+                    setSessions(recentSessions);
+                }
             }
         };
         checkUser();
@@ -54,9 +69,29 @@ export default function UserDashboard() {
         }
     }, [messages, view]);
 
+    const loadSession = async (sessionId: string) => {
+        setLoading(true);
+        setCurrentSessionId(sessionId);
+        setView("chat");
+        if (window.innerWidth < 768) setIsSidebarOpen(false); // Close sidebar on mobile
+
+        const { data: pastMessages, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', sessionId)
+            .order('created_at', { ascending: true });
+
+        if (pastMessages && !error) {
+            setMessages(pastMessages.map(m => ({ role: m.role, text: m.content })));
+        } else {
+            setMessages([]);
+        }
+        setLoading(false);
+    };
+
     const handleLogout = async () => {
         await supabase.auth.signOut();
-        router.push("/login");
+        router.push("/login"); // Navbar will handle the redirect/state update as well
     };
 
     const handleSend = async (e?: React.FormEvent) => {
@@ -82,7 +117,8 @@ export default function UserDashboard() {
                 content: msg.text
             }));
 
-            // console.log("Sending request with token:", token ? "Token present" : "MISSING");
+            // Token handling if needed internally
+
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chat/oracle`, {
                 method: "POST",
                 headers: {
@@ -95,22 +131,49 @@ export default function UserDashboard() {
                 })
             });
 
-            // console.log("Response Status:", response.status);
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error("Backend Error Response:", errorText);
+                // console.error("Backend Error Response:", errorText);
+
                 throw new Error(errorText || `Backend returned ${response.status}`);
             }
 
             const data = await response.json();
-            setMessages((prev) => [...prev, { role: "oracle", text: data.response }]);
+            const oracleResponse = data.response;
+            setMessages((prev) => [...prev, { role: "oracle", text: oracleResponse }]);
 
-            // Advance view if heuristic meta-goal met (e.g., after 5 turns)
-            if (currentMessages.length > 5 && view === "chat") {
-                setTimeout(() => setView("roadmap"), 1500);
+            let activeSessionId = currentSessionId;
+
+            // 1. Create session if needed
+            if (!activeSessionId) {
+                const title = userText.slice(0, 30) + (userText.length > 30 ? "..." : "");
+                const { data: newSession, error: sessionError } = await supabase
+                    .from('conversations')
+                    .insert({
+                        user_id: (await supabase.auth.getUser()).data.user?.id,
+                        title: title
+                    })
+                    .select()
+                    .single();
+
+                if (newSession && !sessionError) {
+                    activeSessionId = newSession.id;
+                    setCurrentSessionId(newSession.id);
+                    setSessions(prev => [newSession, ...prev]);
+                }
             }
+
+            // 2. Save Messages (User + Oracle)
+            if (activeSessionId) {
+                await supabase.from('messages').insert([
+                    { conversation_id: activeSessionId, role: 'user', content: userText },
+                    { conversation_id: activeSessionId, role: 'oracle', content: oracleResponse }
+                ]);
+            }
+
         } catch (error) {
-            console.error("Chat Error:", error);
+            // console.error("Chat Error:", error);
+
             setMessages((prev) => [
                 ...prev,
                 { role: "oracle", text: "Error connecting to the Intelligence Engine. Please ensure the backend is active." }
@@ -160,12 +223,19 @@ export default function UserDashboard() {
 
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-8 mb-4 px-2">Recent Sessions</p>
                     <div className="space-y-1">
-                        <button className="w-full text-left block px-3 py-2 text-xs text-slate-500 hover:text-white truncate transition">
-                            Engineering Transition...
-                        </button>
-                        <button className="w-full text-left block px-3 py-2 text-xs text-slate-500 hover:text-white truncate transition">
-                            Industrial Robotics Path
-                        </button>
+                        {sessions.length > 0 ? (
+                            sessions.map((session) => (
+                                <button
+                                    key={session.id}
+                                    onClick={() => loadSession(session.id)}
+                                    className={`w-full text-left block px-3 py-2 text-xs truncate transition ${currentSessionId === session.id ? "text-brand-bronze bg-brand-surface border-l-2 border-brand-bronze" : "text-slate-500 hover:text-white"}`}
+                                >
+                                    {session.title || "Untitled Session"}
+                                </button>
+                            ))
+                        ) : (
+                            <p className="text-[10px] text-slate-600 px-3 italic">No recent sessions found.</p>
+                        )}
                     </div>
                 </nav>
 

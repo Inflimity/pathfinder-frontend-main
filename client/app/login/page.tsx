@@ -46,9 +46,9 @@ export default function LoginPage() {
                 .single();
 
             if (profileError || !profile) {
-                // Fallback or handle error
-                console.error("Error fetching profile:", profileError);
-                router.push("/dashboard");
+                // Generic error for the user, but still allow dashboard redirect for regular flow
+                setError("Account verification issue. Please contact support or try logging in again.");
+                setTimeout(() => router.push("/dashboard"), 2000);
             } else if (profile.role === "admin") {
                 router.push("/admin");
             } else {
