@@ -16,6 +16,20 @@ export default function LoginPage() {
 
     useEffect(() => {
         const checkSession = async () => {
+            // Check if we have a code in the URL (handling Supabase redirecting to login instead of callback)
+            if (typeof window !== "undefined") {
+                const params = new URLSearchParams(window.location.search);
+                const code = params.get("code");
+                if (code) {
+                    // Start loading to prevent UI flash
+                    setLoading(true);
+                    const type = params.get("type"); // recovery, signup, etc.
+                    const next = type === "recovery" ? "/reset-password" : "/dashboard";
+                    router.push(`/auth/callback?code=${code}&next=${next}`);
+                    return;
+                }
+            }
+
             const { data: { session } } = await supabase.auth.getSession();
             if (session) {
                 router.push("/dashboard");
@@ -99,7 +113,7 @@ export default function LoginPage() {
                             <label htmlFor="password" title="Security Key" className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">
                                 Security Key
                             </label>
-                            <Link href="#" className="text-[10px] font-bold uppercase text-brand-bronze hover:text-white transition">
+                            <Link href="/forgot-password" className="text-[10px] font-bold uppercase text-brand-bronze hover:text-white transition">
                                 Reset Key
                             </Link>
                         </div>
